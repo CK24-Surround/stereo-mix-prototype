@@ -114,6 +114,7 @@ void ASMPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		                                   &ASMPlayerCharacter::Jump);
 
 		// GrabSmash
+
 		EnhancedInputComponent->BindAction(AssetData->SmashAction, ETriggerEvent::Started, this,
 		                                   &ASMPlayerCharacter::GrabCharge);
 		EnhancedInputComponent->BindAction(AssetData->SmashAction, ETriggerEvent::Completed, this,
@@ -126,11 +127,14 @@ void ASMPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		EnhancedInputComponent->BindAction(AssetData->SmashAction, ETriggerEvent::Started, this,
 		                                   &ASMPlayerCharacter::Smash);
 		*/
+
 		EnhancedInputComponent->BindAction(AssetData->RangedAttackAction, ETriggerEvent::Triggered, this,
 		                                   &ASMPlayerCharacter::RangedAttack);
 
-		EnhancedInputComponent->BindAction(AssetData->FutureBaseTeamSelectAction, ETriggerEvent::Started, this, &ASMPlayerCharacter::ServerRPCFutureBassTeamSelect);
-		EnhancedInputComponent->BindAction(AssetData->RockTeamSelectAction, ETriggerEvent::Started, this, &ASMPlayerCharacter::ServerRPCRockTeamSelect);
+		EnhancedInputComponent->BindAction(AssetData->FutureBaseTeamSelectAction, ETriggerEvent::Started, this,
+		                                   &ASMPlayerCharacter::ServerRPCFutureBassTeamSelect);
+		EnhancedInputComponent->BindAction(AssetData->RockTeamSelectAction, ETriggerEvent::Started, this,
+		                                   &ASMPlayerCharacter::ServerRPCRockTeamSelect);
 	}
 }
 
@@ -955,7 +959,7 @@ void ASMPlayerCharacter::ServerRPCDetachToCaster_Implementation(FVector_NetQuant
 		CaughtCharacter->ClientRPCSetRotation(InRotation);
 
 		CaughtCharacter->SmashComponent->TriggerTile(TeamComponent->GetCurrentTeam());
-		
+
 		SetCaughtCharacter(nullptr);
 	}
 }
@@ -1405,11 +1409,11 @@ void ASMPlayerCharacter::ResetTeamMaterial()
 
 	switch (TeamComponent->GetCurrentTeam())
 	{
-		case ESMTeam::None:
+	case ESMTeam::None:
 		{
 			break;
 		}
-		case ESMTeam::FutureBass:
+	case ESMTeam::FutureBass:
 		{
 			for (int32 i = 0; i < TotalMaterialCount; ++i)
 			{
@@ -1418,7 +1422,7 @@ void ASMPlayerCharacter::ResetTeamMaterial()
 
 			break;
 		}
-		case ESMTeam::Rock:
+	case ESMTeam::Rock:
 		{
 			for (int32 i = 0; i < TotalMaterialCount; ++i)
 			{
