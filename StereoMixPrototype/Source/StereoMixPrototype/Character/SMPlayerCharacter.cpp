@@ -62,6 +62,10 @@ ASMPlayerCharacter::ASMPlayerCharacter()
 	bCanControl = true;
 	CollisionProfileName = CP_PLAYER;
 	bIsStunned = false;
+
+	MaxChargeGauge = 2.0f;
+	ChargeGauge = 0.0f;
+	CurrentGrabState = EGrabState::Idle;
 }
 
 void ASMPlayerCharacter::PostInitializeComponents()
@@ -98,11 +102,26 @@ void ASMPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (EnhancedInputComponent)
 	{
-		EnhancedInputComponent->BindAction(AssetData->MoveAction, ETriggerEvent::Triggered, this, &ASMPlayerCharacter::Move);
-		EnhancedInputComponent->BindAction(AssetData->JumpAction, ETriggerEvent::Triggered, this, &ASMPlayerCharacter::Jump);
-		EnhancedInputComponent->BindAction(AssetData->HoldAction, ETriggerEvent::Started, this, &ASMPlayerCharacter::Catch);
-		EnhancedInputComponent->BindAction(AssetData->SmashAction, ETriggerEvent::Started, this, &ASMPlayerCharacter::Smash);
-		EnhancedInputComponent->BindAction(AssetData->RangedAttackAction, ETriggerEvent::Triggered, this, &ASMPlayerCharacter::RangedAttack);
+		EnhancedInputComponent->BindAction(AssetData->MoveAction, ETriggerEvent::Triggered, this,
+		                                   &ASMPlayerCharacter::Move);
+		EnhancedInputComponent->BindAction(AssetData->JumpAction, ETriggerEvent::Triggered, this,
+		                                   &ASMPlayerCharacter::Jump);
+
+		// GrabSmash
+		EnhancedInputComponent->BindAction(AssetData->SmashAction, ETriggerEvent::Started, this,
+		                                   &ASMPlayerCharacter::GrabCharge);
+		EnhancedInputComponent->BindAction(AssetData->SmashAction, ETriggerEvent::Completed, this,
+		                                   &ASMPlayerCharacter::GrabSmash);
+
+		// Catch & Smash
+		/*
+		EnhancedInputComponent->BindAction(AssetData->HoldAction, ETriggerEvent::Started, this,
+		                                   &ASMPlayerCharacter::Catch);
+		EnhancedInputComponent->BindAction(AssetData->SmashAction, ETriggerEvent::Started, this,
+		                                   &ASMPlayerCharacter::Smash);
+		*/
+		EnhancedInputComponent->BindAction(AssetData->RangedAttackAction, ETriggerEvent::Triggered, this,
+		                                   &ASMPlayerCharacter::RangedAttack);
 	}
 }
 
@@ -117,6 +136,8 @@ void ASMPlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ASMPlayerCharacter, CaughtCharacter);
 	DOREPLIFETIME(ASMPlayerCharacter, CollisionProfileName);
 	DOREPLIFETIME(ASMPlayerCharacter, bIsStunned);
+	DOREPLIFETIME(ASMPlayerCharacter, ChargeGauge);
+	DOREPLIFETIME(ASMPlayerCharacter, CurrentGrabState);
 }
 
 void ASMPlayerCharacter::OnRep_Controller()
@@ -155,27 +176,27 @@ void ASMPlayerCharacter::OnRep_CurrentState()
 {
 	switch (CurrentState)
 	{
-		case EPlayerCharacterState::Normal:
+	case EPlayerCharacterState::Normal:
 		{
 			NET_LOG(LogSMCharacter, Log, TEXT("현재 캐릭터 상태: Normal"));
 			break;
 		}
-		case EPlayerCharacterState::Stun:
+	case EPlayerCharacterState::Stun:
 		{
 			NET_LOG(LogSMCharacter, Log, TEXT("현재 캐릭터 상태: Stun"));
 			break;
 		}
-		case EPlayerCharacterState::Caught:
+	case EPlayerCharacterState::Caught:
 		{
 			NET_LOG(LogSMCharacter, Log, TEXT("현재 캐릭터 상태: Caught"));
 			break;
 		}
-		case EPlayerCharacterState::Down:
+	case EPlayerCharacterState::Down:
 		{
 			NET_LOG(LogSMCharacter, Log, TEXT("현재 캐릭터 상태: Down"));
 			break;
 		}
-		case EPlayerCharacterState::Smash:
+	case EPlayerCharacterState::Smash:
 		{
 			NET_LOG(LogSMCharacter, Log, TEXT("현재 캐릭터 상태: Smash"));
 			break;
@@ -256,13 +277,43 @@ void ASMPlayerCharacter::Tick(float DeltaSeconds)
 			UpdateInterpolationPull();
 		}
 	}
+
+#if WITH_SERVER_CODE
+	if (HasAuthority())
+	{
+		// NET_LOG(LogSMCharacter, Log, TEXT("%f, %d, %s"), ChargeGauge, CurrentGrabState, *GetNameSafe(TargetCharacter));
+		if (CurrentGrabState == EGrabState::Charge && ChargeGauge < MaxChargeGauge)
+		{
+			NET_LOG(LogSMCharacter, Log, TEXT("Charge"));
+			ChargeGauge += DeltaSeconds;
+			NET_LOG(LogSMCharacter, Log, TEXT("ChargeGauge: %f"), ChargeGauge);
+			if (ChargeGauge >= MaxChargeGauge)
+			{
+				ChargeGauge = MaxChargeGauge;
+			}
+		}
+		else if (CurrentGrabState == EGrabState::Dash && CaughtCharacter)
+		{
+			NET_LOG(LogSMCharacter, Log, TEXT("Dash"));
+			MoveToTargetCharacterOnTick(DeltaSeconds);
+		}
+		else if (CurrentGrabState == EGrabState::Smash && CaughtCharacter)
+		{
+			NET_LOG(LogSMCharacter, Log, TEXT("Smash"));
+			MoveToSmashPointOnTick(DeltaSeconds);
+		}
+	}
+#endif
+	if (!HasAuthority())
+	{
+	}
 }
 
 void ASMPlayerCharacter::InitCamera()
 {
 	const FRotator CameraRotation(-45.0f, 0.0, 0.0);
-	const float CameraDistance = 750.0f;
-	const float CameraFOV = 90.0f;
+	constexpr float CameraDistance = 750.0f;
+	constexpr float CameraFOV = 90.0f;
 
 	CameraBoom->SetRelativeRotation(CameraRotation);
 	CameraBoom->bInheritPitch = false;
@@ -285,7 +336,8 @@ void ASMPlayerCharacter::InitCharacterControl()
 	APlayerController* PlayerController = Cast<APlayerController>(GetController());
 	if (PlayerController)
 	{
-		UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer());
+		UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(
+			PlayerController->GetLocalPlayer());
 		if (Subsystem)
 		{
 			Subsystem->ClearAllMappings();
@@ -366,6 +418,10 @@ void ASMPlayerCharacter::SetCurrentState(EPlayerCharacterState InState)
 	}
 
 	CurrentState = InState;
+	if (CurrentGrabState != EGrabState::Idle)
+	{
+		CancelGrab();
+	}
 	OnRep_CurrentState();
 }
 
@@ -416,6 +472,9 @@ void ASMPlayerCharacter::RecoverStunned()
 	// 만약 기절 상태가 아니면(잡혀있다면) 아래 코드를 수행하지 않아야 합니다. 
 	if (CurrentState == EPlayerCharacterState::Stun)
 	{
+		SetCanControl(true);
+		SetEnableMovement(true);
+		SetEnableCollision(true);
 		StoredSMAnimInstance->PlayStunEnd();
 		MulticastRPCPlayStunEndAnimation();
 	}
@@ -456,12 +515,14 @@ void ASMPlayerCharacter::SetCanControl(bool bInEnableControl)
 		return;
 	}
 
+	NET_LOG(LogSMCharacter, Log, TEXT("컨트롤 %s"), bInEnableControl ? TEXT("활성화") : TEXT("비활성화"));
 	bCanControl = bInEnableControl;
 	OnRep_bCanControl();
 }
 
 TArray<ASMPlayerCharacter*> ASMPlayerCharacter::GetCharactersExcludingServerAndCaster()
 {
+	// 해당 로직은 for문 한 번 순회 후 외부에서 배열로 한 번 더 순회하기 떄문에 비효율적입니다. (곽필경)
 	TArray<ASMPlayerCharacter*> Result;
 	for (const APlayerController* PlayerController : TActorRange<APlayerController>(GetWorld()))
 	{
@@ -488,7 +549,8 @@ float ASMPlayerCharacter::DistanceHeightFromFloor()
 	FCollisionObjectQueryParams CollisionObjectQueryParams;
 	FCollisionQueryParams CollisionQueryParams(SCENE_QUERY_STAT(DistanceHeigh), false, this);
 	CollisionObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
-	const bool bSuccess = GetWorld()->LineTraceSingleByObjectType(HitResult, Start, End, CollisionObjectQueryParams, CollisionQueryParams);
+	const bool bSuccess = GetWorld()->LineTraceSingleByObjectType(HitResult, Start, End, CollisionObjectQueryParams,
+	                                                              CollisionQueryParams);
 	if (bSuccess)
 	{
 		const float Distance = (HitResult.Location - Start).Size();
@@ -496,10 +558,7 @@ float ASMPlayerCharacter::DistanceHeightFromFloor()
 
 		return Distance;
 	}
-	else
-	{
-		return 0.0f;
-	}
+	return 0.0f;
 }
 
 void ASMPlayerCharacter::OnJumped_Implementation()
@@ -532,7 +591,8 @@ void ASMPlayerCharacter::Catch()
 		bCanCatch = false;
 
 		FTimerHandle TimerHandle;
-		GetWorldTimerManager().SetTimer(TimerHandle, this, &ASMPlayerCharacter::CanCatch, DesignData->CatchCoolDownTime);
+		GetWorldTimerManager().SetTimer(TimerHandle, this, &ASMPlayerCharacter::CanCatch,
+		                                DesignData->CatchCoolDownTime);
 
 		if (!CaughtCharacter)
 		{
@@ -555,7 +615,8 @@ void ASMPlayerCharacter::ServerRPCPlayCatchAnimation_Implementation()
 	}
 }
 
-void ASMPlayerCharacter::ClientRPCPlayCatchAnimation_Implementation(const ASMPlayerCharacter* InPlayAnimationCharacter) const
+void ASMPlayerCharacter::ClientRPCPlayCatchAnimation_Implementation(
+	const ASMPlayerCharacter* InPlayAnimationCharacter) const
 {
 	InPlayAnimationCharacter->StoredSMAnimInstance->PlayCatch();
 }
@@ -564,6 +625,11 @@ void ASMPlayerCharacter::AnimNotify_Catch()
 {
 	if (IsLocallyControlled())
 	{
+		if (CurrentGrabState != EGrabState::Idle)
+		{
+			return;
+		}
+
 		NET_LOG(LogSMCharacter, Log, TEXT("잡기 시작"));
 
 		// 나중에 기절 종료 애니메이션이 재생되는 중에 잡기가 성사되고, 서버지연으로인해 잡기가 먼저 처리 된 뒤 기절 종료 애니가 재생 마무리 될경우 버그를 방지하기 위해 서버측에서 유효하지 않은 상황이라면 롤백하는 검증 코드가 필요합니다.
@@ -575,7 +641,9 @@ void ASMPlayerCharacter::AnimNotify_Catch()
 		FCollisionObjectQueryParams CollisionObjectQueryParams;
 		CollisionObjectQueryParams.AddObjectTypesToQuery(OC_STUNNED);
 		FCollisionQueryParams CollisionQueryParams(SCENE_QUERY_STAT(Catch), false, this);
-		bool bSuccess = GetWorld()->SweepSingleByObjectType(HitResult, Start, End, FQuat::Identity, CollisionObjectQueryParams, FCollisionShape::MakeSphere(50.0f), CollisionQueryParams);
+		bool bSuccess = GetWorld()->SweepSingleByObjectType(HitResult, Start, End, FQuat::Identity,
+		                                                    CollisionObjectQueryParams,
+		                                                    FCollisionShape::MakeSphere(50.0f), CollisionQueryParams);
 
 		// 충돌 시
 		if (bSuccess)
@@ -598,7 +666,8 @@ void ASMPlayerCharacter::AnimNotify_Catch()
 		// 디버거
 		const FVector Center = Start + (End - Start) * 0.5f;
 		const FColor DrawColor = bSuccess ? FColor::Green : FColor::Red;
-		DrawDebugCapsule(GetWorld(), Center, 150.0f, 50.0f, FRotationMatrix::MakeFromZ(GetActorForwardVector()).ToQuat(), DrawColor, false, 1.0f);
+		DrawDebugCapsule(GetWorld(), Center, 150.0f, 50.0f,
+		                 FRotationMatrix::MakeFromZ(GetActorForwardVector()).ToQuat(), DrawColor, false, 1.0f);
 	}
 }
 
@@ -724,7 +793,8 @@ void ASMPlayerCharacter::HandlePullEnd()
 		GetCharacterMovement()->bIgnoreClientMovementErrorChecksAndCorrection = true;
 		PullData.Caster->SetCaughtCharacter(this);
 
-		AttachToComponent(PullData.Caster->GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, TEXT("CatchSocket"));
+		AttachToComponent(PullData.Caster->GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale,
+		                  TEXT("CatchSocket"));
 		StoredSMPlayerController->SetViewTargetWithBlend(PullData.Caster, 0.3f);
 
 		for (const APlayerController* PlayerController : TActorRange<APlayerController>(GetWorld()))
@@ -777,7 +847,8 @@ void ASMPlayerCharacter::ServerRPCPlaySmashAnimation_Implementation()
 	}
 }
 
-void ASMPlayerCharacter::ClientRPCPlaySmashAnimation_Implementation(const ASMPlayerCharacter* InCharacterToAnimation) const
+void ASMPlayerCharacter::ClientRPCPlaySmashAnimation_Implementation(
+	const ASMPlayerCharacter* InCharacterToAnimation) const
 {
 	if (InCharacterToAnimation)
 	{
@@ -789,6 +860,11 @@ void ASMPlayerCharacter::AnimNotify_Smash()
 {
 	// 캐스터 클라이언트에서만 실행되야합니다.
 	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (CurrentGrabState != EGrabState::Idle)
 	{
 		return;
 	}
@@ -851,7 +927,8 @@ void ASMPlayerCharacter::ServerRPCDetachToCaster_Implementation(FVector_NetQuant
 	if (CaughtCharacter)
 	{
 		FTimerHandle TimerHandle;
-		GetWorldTimerManager().SetTimer(TimerHandle, CaughtCharacter.Get(), &ASMPlayerCharacter::MulticastRPCPlayStandUpAnimation, DesignData->StandUpTime);
+		GetWorldTimerManager().SetTimer(TimerHandle, CaughtCharacter.Get(),
+		                                &ASMPlayerCharacter::MulticastRPCPlayStandUpAnimation, DesignData->StandUpTime);
 
 		NET_LOG(LogSMCharacter, Log, TEXT("디태치"));
 		CaughtCharacter->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -893,6 +970,13 @@ void ASMPlayerCharacter::ClientRPCSetRotation_Implementation(FRotator InRotation
 void ASMPlayerCharacter::MulticastRPCPlayStandUpAnimation_Implementation()
 {
 	StoredSMAnimInstance->PlayStandUp();
+	if (HasAuthority())
+	{
+		SetCurrentState(EPlayerCharacterState::Normal);
+		SetCanControl(true);
+		SetEnableMovement(true);
+		SetEnableCollision(true);
+	}
 }
 
 void ASMPlayerCharacter::StandUpEnded(UAnimMontage* PlayAnimMontage, bool bInterrupted)
@@ -905,6 +989,319 @@ void ASMPlayerCharacter::StandUpEnded(UAnimMontage* PlayAnimMontage, bool bInter
 		SetCollisionProfileName(CP_PLAYER);
 		SetCanControl(true);
 	}
+}
+
+void ASMPlayerCharacter::OnRep_ChargeGauge() const
+{
+	NET_LOG(LogSMCharacter, Log, TEXT("OnRep_ChargeGauge: %f"), ChargeGauge);
+}
+
+void ASMPlayerCharacter::OnRep_CurrentGrabState() const
+{
+	NET_LOG(LogSMCharacter, Log, TEXT("OnRep_CurrentGrabState: %d"), CurrentGrabState);
+}
+
+void ASMPlayerCharacter::ClientRPCBeginGrabSmash_Implementation(ASMPlayerCharacter* InstigatorCharacter)
+{
+	NET_LOG(LogSMCharacter, Log, TEXT("ClientRPCBeginGrabSmash"));
+	if (IsLocallyControlled())
+	{
+		// SetRole(ROLE_SimulatedProxy);
+		GetCharacterMovement()->NetworkSmoothingMode = ENetworkSmoothingMode::Exponential;
+	}
+	InstigatorCharacter->StoredSMAnimInstance->PlayCatch();
+}
+
+void ASMPlayerCharacter::ClientRPCPerformGrabSmash_Implementation(ASMPlayerCharacter* InstigatorCharacter,
+                                                                  ASMPlayerCharacter* TargetCharacter)
+{
+	NET_LOG(LogSMCharacter, Log, TEXT("ClientRPCPerformGrabSmash"));
+	InstigatorCharacter->StoredSMAnimInstance->PlaySmash();
+	if (TargetCharacter)
+	{
+		TargetCharacter->StoredSMAnimInstance->PlayCaught();
+	}
+}
+
+void ASMPlayerCharacter::ClientRPCPostGrabSmash_Implementation(ASMPlayerCharacter* InstigatorCharacter,
+                                                               ASMPlayerCharacter* TargetCharacter)
+{
+	NET_LOG(LogSMCharacter, Log, TEXT("ClientRPCPostGrabSmash"));
+	if (IsLocallyControlled())
+	{
+		// SetRole(ROLE_AutonomousProxy);
+		GetCharacterMovement()->NetworkSmoothingMode = ENetworkSmoothingMode::Disabled;
+	}
+	if (TargetCharacter)
+	{
+		TargetCharacter->StoredSMAnimInstance->PlayKnockDown();
+	}
+}
+
+void ASMPlayerCharacter::ResetCharge()
+{
+	CurrentGrabState = EGrabState::Idle;
+	ChargeGauge = 0.0f;
+}
+
+void ASMPlayerCharacter::StartGrab(const float ChargedGauge)
+{
+#if WITH_SERVER_CODE
+	if (!GetOwner()->HasAuthority())
+	{
+		CancelGrab();
+		return;
+	}
+
+	if (!CanGrab())
+	{
+		CancelGrab();
+		return;
+	}
+
+	CurrentGrabState = EGrabState::Dash;
+	CaughtCharacter = FindGrabTarget();
+	NET_LOG(LogSMCharacter, Log, TEXT("Grab target: %s"), *GetNameSafe(CaughtCharacter));
+	if (!CaughtCharacter)
+	{
+		CancelGrab();
+		return;
+	}
+	CaughtCharacter->SetCanControl(false);
+	CaughtCharacter->SetEnableMovement(false);
+	CaughtCharacter->SetEnableCollision(false);
+	this->LastChargedGauge = ChargedGauge;
+
+	for (const APlayerController* PlayerController : TActorRange<APlayerController>(GetWorld()))
+	{
+		if (ASMPlayerCharacter* SMPlayerCharacter = Cast<ASMPlayerCharacter>(PlayerController->GetPawn()))
+		{
+			SMPlayerCharacter->ClientRPCBeginGrabSmash(this);
+		}
+	}
+
+
+#endif
+}
+
+void ASMPlayerCharacter::CancelGrab()
+{
+	CurrentGrabState = EGrabState::Idle;
+	SetCanControl(true);
+	SetEnableMovement(true);
+	SetEnableCollision(true);
+	if (CaughtCharacter)
+	{
+		CaughtCharacter->ApplyStunned();
+		CaughtCharacter = nullptr;
+	}
+}
+
+bool ASMPlayerCharacter::CanGrab() const
+{
+	return CurrentState == EPlayerCharacterState::Normal;
+}
+
+ASMPlayerCharacter* ASMPlayerCharacter::FindGrabTarget() const
+{
+	FCollisionObjectQueryParams CollisionObjectQueryParams;
+	CollisionObjectQueryParams.AddObjectTypesToQuery(OC_STUNNED);
+	const FCollisionQueryParams CollisionQueryParams(SCENE_QUERY_STAT(Catch), false, this);
+
+	const FVector ActorLocation = GetActorLocation();
+	TArray<FHitResult> HitResults;
+	bool bSuccess = GetWorld()->SweepMultiByObjectType(HitResults, ActorLocation, ActorLocation, FQuat::Identity,
+	                                                   CollisionObjectQueryParams,
+	                                                   FCollisionShape::MakeSphere(300.0f),
+	                                                   CollisionQueryParams);
+
+#if WITH_EDITOR
+	const FColor DrawColor = bSuccess ? FColor::Green : FColor::Red;
+	DrawDebugSphere(GetWorld(), ActorLocation, 300.0f, 16, DrawColor, false, 1.0f);
+#endif
+
+	if (bSuccess)
+	{
+		for (const auto& HitResult : HitResults)
+		{
+			ASMPlayerCharacter* HitCharacter = Cast<ASMPlayerCharacter>(HitResult.GetActor());
+			if (HitCharacter && HitCharacter->GetCurrentState() == EPlayerCharacterState::Stun)
+			{
+				return HitCharacter;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+void ASMPlayerCharacter::MoveToTargetCharacterOnTick(const float DeltaTime)
+{
+	if (!CaughtCharacter)
+	{
+		return;
+	}
+
+	if (MoveToPointOnTick(CaughtCharacter->GetActorLocation(), DeltaTime))
+	{
+		for (const APlayerController* PlayerController : TActorRange<APlayerController>(GetWorld()))
+		{
+			if (ASMPlayerCharacter* SMPlayerCharacter = Cast<ASMPlayerCharacter>(PlayerController->GetPawn()))
+			{
+				SMPlayerCharacter->ClientRPCPerformGrabSmash(this, CaughtCharacter);
+			}
+		}
+		CaughtCharacter->SetCurrentState(EPlayerCharacterState::Caught);
+
+		// set SmashPoint to Direction + 100f
+		const FVector Direction = GetActorForwardVector();
+		// TODO: change smash point to be calculated charge gauge
+
+		float First = MaxChargeGauge / 3.0f;
+		float Second = MaxChargeGauge / 3.0f * 2.0f;
+		float SmashDistance = 0.0f;
+		if (LastChargedGauge < First)
+		{
+			SmashDistance = 50.0f;
+		}
+		else if (LastChargedGauge < Second)
+		{
+			SmashDistance = 250.0f;
+		}
+		else
+		{
+			SmashDistance = 500.0f;
+		}
+
+		SmashPoint = CaughtCharacter->GetActorLocation() + Direction * SmashDistance;
+
+		FHitResult HitResult;
+		const FVector End = GetActorLocation() + (-GetActorUpVector() * 10000.0f);
+		FCollisionObjectQueryParams CollisionObjectQueryParams;
+		FCollisionQueryParams CollisionQueryParams(SCENE_QUERY_STAT(DistanceHeigh), false, this);
+		CollisionObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		const bool bSuccess = GetWorld()->LineTraceSingleByObjectType(HitResult, SmashPoint.GetValue(), End,
+		                                                              CollisionObjectQueryParams,
+		                                                              CollisionQueryParams);
+		if (bSuccess)
+		{
+			SmashPoint = HitResult.Location;
+		}
+
+		CurrentGrabState = EGrabState::Smash;
+		CaughtCharacter->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale,
+		                                   TEXT("CatchSocket"));
+	}
+}
+
+void ASMPlayerCharacter::MoveToSmashPointOnTick(const float DeltaTime)
+{
+	if (!SmashPoint.IsSet())
+	{
+		return;
+	}
+
+	if (MoveToPointOnTick(SmashPoint.GetValue(), DeltaTime))
+	{
+		for (const APlayerController* PlayerController : TActorRange<APlayerController>(GetWorld()))
+		{
+			ASMPlayerCharacter* SMPlayerCharacter = Cast<ASMPlayerCharacter>(PlayerController->GetPawn());
+			if (SMPlayerCharacter)
+			{
+				SMPlayerCharacter->ClientRPCPostGrabSmash(this, CaughtCharacter);
+			}
+		}
+
+		FTimerHandle TimerHandle;
+		GetWorldTimerManager().SetTimer(TimerHandle, CaughtCharacter.Get(),
+		                                &ASMPlayerCharacter::MulticastRPCPlayStandUpAnimation, DesignData->StandUpTime);
+
+		NET_LOG(LogSMCharacter, Log, TEXT("디태치"));
+		CaughtCharacter->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+		CaughtCharacter->GetCharacterMovement()->bIgnoreClientMovementErrorChecksAndCorrection = false;
+		CaughtCharacter->SetCollisionProfileName(CP_KNOCK_DOWN);
+
+		// 뷰타겟 설정은 서버에서만 실행해주면 알아서 동기화됩니다.
+		CaughtCharacter->StoredSMPlayerController->SetViewTargetWithBlend(CaughtCharacter, 0.3f);
+
+		// 로컬에서 회전을 변경해주는 이유는 컨트롤러 관련은 언리얼에서 클라이언트 우선이기 때문입니다. 여기서 바꾸는 값은 컨트롤러의 회전값입니다.
+		CaughtCharacter->SetActorLocation(SmashPoint.GetValue());
+		CaughtCharacter->ClientRPCSetRotation(GetActorForwardVector().Rotation());
+
+		SetCanControl(true);
+		SetCaughtCharacter(nullptr);
+
+		CurrentGrabState = EGrabState::Idle;
+		SmashPoint.Reset();
+	}
+}
+
+bool ASMPlayerCharacter::MoveToPointOnTick(const FVector& TargetPoint, const float DeltaTime)
+{
+	const FVector CurrentLocation = GetActorLocation();
+	const FVector Direction = (TargetPoint - CurrentLocation).GetSafeNormal();
+	const FVector MoveVector = Direction * MoveSpeed * DeltaTime;
+	const float DistanceToTarget = (TargetPoint - CurrentLocation).Size();
+	FVector NewLocation;
+
+
+	if (MoveVector.Size() > DistanceToTarget)
+	{
+		// Bug 1: 층이 다른 경우 캐릭터가 타겟 위치까지 이동할 수 없으므로 영원히 Dash 상태가 됨.
+		// Bug 2: 스매시 위치 층이 다른 경우 위치 체크가 제대로 되지 않아 영원히 Smash 상태가 됨.
+		NewLocation = TargetPoint;
+		// End move to target position
+		return true;
+	}
+	NewLocation = CurrentLocation + MoveVector;
+
+	const FRotator Rotation = FRotationMatrix::MakeFromX(Direction).Rotator();
+	SetActorLocationAndRotation(NewLocation, Rotation);
+	return false;
+}
+
+void ASMPlayerCharacter::GrabCharge()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (CurrentGrabState != EGrabState::Idle)
+	{
+		return;
+	}
+	NET_LOG(LogSMCharacter, Log, TEXT("LocalBeginCharge"));
+	ServerRPCBeginCharge(GetWorld()->GetGameState()->GetServerWorldTimeSeconds());
+}
+
+void ASMPlayerCharacter::GrabSmash()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	NET_LOG(LogSMCharacter, Log, TEXT("Current grab state: %d"), CurrentGrabState);
+	ServerRPCBeginGrab(GetWorld()->GetGameState()->GetServerWorldTimeSeconds());
+}
+
+void ASMPlayerCharacter::ServerRPCBeginCharge_Implementation(const double LocalBeginTime)
+{
+	const double Latency = GetWorld()->GetTimeSeconds() - LocalBeginTime;
+	const float InitGauge = FMath::Clamp(Latency, 0.0, MaxChargeGauge);
+	ChargeGauge = InitGauge;
+	CurrentGrabState = EGrabState::Charge;
+	NET_LOG(LogSMCharacter, Log, TEXT("Server Begin charge: %f"), ChargeGauge);
+}
+
+void ASMPlayerCharacter::ServerRPCBeginGrab_Implementation(const double LocalBeginTime)
+{
+	const float ChargedGauge = ChargeGauge;
+	NET_LOG(LogSMCharacter, Log, TEXT("Last charged gauge: %f"), ChargedGauge);
+	SetCanControl(false);
+	StartGrab(ChargedGauge);
 }
 
 void ASMPlayerCharacter::RangedAttack()
@@ -939,7 +1336,8 @@ void ASMPlayerCharacter::ServerRPCPlayRangedAttackAnimation_Implementation()
 	}
 }
 
-void ASMPlayerCharacter::ClientRPCPlayRangedAttackAnimation_Implementation(const ASMPlayerCharacter* CharacterToAnimation) const
+void ASMPlayerCharacter::ClientRPCPlayRangedAttackAnimation_Implementation(
+	const ASMPlayerCharacter* CharacterToAnimation) const
 {
 	if (CharacterToAnimation)
 	{
@@ -964,10 +1362,12 @@ void ASMPlayerCharacter::AnimNotify_RangedAttack()
 
 void ASMPlayerCharacter::ServerRPCShootProjectile_Implementation(ASMPlayerCharacter* NewOwner)
 {
-	const FVector SpawnLocation = GetActorLocation() + (GetActorForwardVector() * GetCapsuleComponent()->GetScaledCapsuleRadius() * 2);
+	const FVector SpawnLocation = GetActorLocation() + (GetActorForwardVector() * GetCapsuleComponent()->
+		GetScaledCapsuleRadius() * 2);
 	const FRotator SpawnRotation = GetActorRotation();
 	const FTransform SpawnTransform = FTransform(SpawnRotation, SpawnLocation);
-	ASMRangedAttackProjectile* CachedProjectile = GetWorld()->SpawnActorDeferred<ASMRangedAttackProjectile>(AssetData->RangedAttackProjectileClass, SpawnTransform);
+	ASMRangedAttackProjectile* CachedProjectile = GetWorld()->SpawnActorDeferred<ASMRangedAttackProjectile>(
+		AssetData->RangedAttackProjectileClass, SpawnTransform);
 	if (CachedProjectile)
 	{
 		CachedProjectile->SetOwningPawn(NewOwner);
@@ -983,6 +1383,7 @@ void ASMPlayerCharacter::HitProjectile()
 	if (CurrentState != EPlayerCharacterState::Smash)
 	{
 		Stat->AddCurrentPostureGauge(25.0f);
-		NET_LOG(LogSMCharacter, Log, TEXT("현재 체간 게이지 %f / %f"), Stat->GetCurrentPostureGauge(), Stat->GetBaseStat().MaxPostureGauge);
+		NET_LOG(LogSMCharacter, Log, TEXT("현재 체간 게이지 %f / %f"), Stat->GetCurrentPostureGauge(),
+		        Stat->GetBaseStat().MaxPostureGauge);
 	}
 }
