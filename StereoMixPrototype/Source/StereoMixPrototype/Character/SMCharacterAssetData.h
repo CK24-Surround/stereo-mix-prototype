@@ -39,6 +39,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<const UInputAction> RangedAttackAction;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<const UInputAction> FutureBaseTeamSelectAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<const UInputAction> RockTeamSelectAction;
+
 public:
 	UPROPERTY(EditDefaultsOnly, Category = "Projectile")
 	TSubclassOf<ASMRangedAttackProjectile> RangedAttackProjectileClass;
@@ -46,4 +52,11 @@ public:
 public:
 	UPROPERTY(EditDefaultsOnly, Category = "UI")
 	TSubclassOf<USMPostureGaugeWidget> PostureGauge;
+
+public:
+	UPROPERTY(EditDefaultsOnly, Category = "Material")
+	TObjectPtr<UMaterialInterface> FutureBassTeamMaterial;
+	
+	UPROPERTY(EditDefaultsOnly, Category = "Material")
+	TObjectPtr<UMaterialInterface> RockTeamMaterial;
 };
