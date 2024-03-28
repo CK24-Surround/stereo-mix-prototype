@@ -54,7 +54,7 @@ public:
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
-// ~Property Replicate Section
+	// ~Property Replicate Section
 public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -84,23 +84,23 @@ protected:
 
 protected:
 	UPROPERTY(ReplicatedUsing = OnRep_bCanControl)
-	uint32 bCanControl:1;
+	uint32 bCanControl : 1;
 
 	UPROPERTY(ReplicatedUsing = OnRep_CurrentState)
 	EPlayerCharacterState CurrentState;
 
 	UPROPERTY(ReplicatedUsing = OnRep_bEnableMovement)
-	uint32 bEnableMovement:1;
+	uint32 bEnableMovement : 1;
 
 	UPROPERTY(ReplicatedUsing = OnRep_bEnableCollision)
-	uint32 bEnableCollision:1;
+	uint32 bEnableCollision : 1;
 
 	UPROPERTY(ReplicatedUsing = OnRep_CollisionProfileName)
 	FName CollisionProfileName;
 
 	UPROPERTY(ReplicatedUsing = OnRep_bIsStunned)
-	uint32 bIsStunned:1;
-// ~End of Property Replicate Section
+	uint32 bIsStunned : 1;
+	// ~End of Property Replicate Section
 
 protected:
 	virtual void BeginPlay() override;
@@ -108,7 +108,7 @@ protected:
 public:
 	virtual void Tick(float DeltaSeconds) override;
 
-// ~Camera Section
+	// ~Camera Section
 protected:
 	/** 카메라 초기세팅에 사용되는 함수입니다. */
 	void InitCamera();
@@ -118,9 +118,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
 	TObjectPtr<UCameraComponent> Camera;
-// ~End of Camera Section
+	// ~End of Camera Section
 
-// ~Input Section
+	// ~Input Section
 protected:
 	/** 컨트롤러의 초기 세팅에 사용되는 함수입니다. */
 	void InitCharacterControl();
@@ -136,7 +136,9 @@ protected:
 
 // ~End of Input Section
 
-// ~Movement Section
+	// ~End of Input Section
+
+	// ~Movement Section
 public:
 	void SetEnableMovement(bool bInEnableMovement);
 
@@ -146,9 +148,9 @@ protected:
 protected:
 	UPROPERTY()
 	TObjectPtr<UNiagaraComponent> MoveTrailEffectComponent;
-// ~End of Movement Section
+	// ~End of Movement Section
 
-// ~Character State Section
+	// ~Character State Section
 public:
 	FORCEINLINE EPlayerCharacterState GetCurrentState() { return CurrentState; }
 	void SetCurrentState(EPlayerCharacterState InState);
@@ -195,49 +197,52 @@ protected:
 	TObjectPtr<ASMPlayerState> StoredSMPlayerState;
 // ~End of Character Section
 
-// ~Aim Section
+	FTimerHandle StunTimerHandle;
+	// ~End of Character Section
+
+	// ~Aim Section
 protected:
 	UPROPERTY()
 	TObjectPtr<AAimPlane> AimPlane;
-// ~End of Aim Section
+	// ~End of Aim Section
 
-// ~Control Section
+	// ~Control Section
 public:
 	void SetCanControl(bool bInEnableControl);
 
 protected:
 	UPROPERTY()
 	TObjectPtr<ASMPlayerController> StoredSMPlayerController;
-// ~End of Control Section
+	// ~End of Control Section
 
-// ~Util Section
+	// ~Util Section
 public:
 	/** 서버와 시전자를 제외한 플레이어 캐릭터들을 반환합니다. */
 	TArray<ASMPlayerCharacter*> GetCharactersExcludingServerAndCaster();
 
 	/** 현재 캐릭터의 위치에서 가장 가까운 바닥까지의 거리를 반환합니다. */
 	float DistanceHeightFromFloor();
-// ~End of Util Section
+	// ~End of Util Section
 
-// ~Jump Section
+	// ~Jump Section
 protected:
 	/** 점프 시 호출되는 이벤트입니다. */
 	virtual void OnJumped_Implementation() override;
 
 	/** 착지 시 호출되는 이벤트입니다. */
 	virtual void Landed(const FHitResult& Hit) override;
-// ~Jump Section
+	// ~Jump Section
 
-// ~Stat Section
+	// ~Stat Section
 protected:
 	const float MoveSpeed = 700.0f;
-// ~End of Stat Section
+	// ~End of Stat Section
 
-// ~Catch Section
+	// ~Catch Section
 protected:
 	struct FPullData
 	{
-		uint32 bIsPulling:1 = false;
+		uint32 bIsPulling : 1 = false;
 		ASMPlayerCharacter* Caster;
 		FVector StartLocation;
 		FVector EndLocation;
@@ -293,16 +298,21 @@ protected:
 	UPROPERTY(Replicated)
 	TObjectPtr<ASMPlayerCharacter> CaughtCharacter;
 
-	uint32 bCanCatch:1 = true;
+	uint32 bCanCatch : 1 = true;
 
 	FVector CatchLocation;
 
 public: // Animation Interface Section
-	FORCEINLINE virtual bool GetHasAcceleration() override { return GetCharacterMovement()->GetCurrentAcceleration() != FVector::ZeroVector; }
+	FORCEINLINE virtual bool GetHasAcceleration() override
+	{
+		return GetCharacterMovement()->GetCurrentAcceleration() != FVector::ZeroVector;
+	}
+
 	FORCEINLINE virtual bool GetIsFalling() override { return GetCharacterMovement()->IsFalling(); }
 	FORCEINLINE virtual float GetZVelocity() override { return GetCharacterMovement()->Velocity.Z; }
+	FORCEINLINE const USMCharacterAnimInstance* GetStoredSMAnimInstance() const { return StoredSMAnimInstance.Get(); }
 
-// ~Smash Section
+	// ~Smash Section
 protected:
 	void Smash();
 
@@ -336,9 +346,9 @@ protected:
 
 	/** 기상 애니메이션이 종료되고난 뒤에 호출됩니다. */
 	void StandUpEnded(UAnimMontage* PlayAnimMontage, bool bInterrupted);
-// ~End of Smash Section
+	// ~End of Smash Section
 
-// ~Ranged Attack Section
+	// ~Ranged Attack Section
 protected:
 	void RangedAttack();
 
@@ -362,10 +372,10 @@ protected:
 	void MulticastRPCPlayProjectileHitVisualEffect(ASMPlayerCharacter* NeedPlayingCharacter);
 
 protected:
-	uint32 bCanRangedAttack:1 = true;
-// ~End of Ranged Attack Section
+	uint32 bCanRangedAttack : 1 = true;
+	// ~End of Ranged Attack Section
 
-// ~UI Section
+	// ~UI Section
 protected:
 	UFUNCTION(Server, Reliable)
 	void ServerRPCSetPlayerName(const FString& InName);
@@ -376,9 +386,9 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<USMPostureGaugeWidget> PostureGaugeWidget;
-// ~End of UI Section
+	// ~End of UI Section
 
-// ~Team Section
+	// ~Team Section
 public:
 	FORCEINLINE virtual USMTeamComponent* GetTeamComponent() override { return TeamComponent; }
 
@@ -396,11 +406,11 @@ protected:
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Team")
 	TObjectPtr<USMTeamComponent> TeamComponent;
-// ~End of Team Section
+	// ~End of Team Section
 
-// ~Tile Flip Section
+	// ~Tile Flip Section
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Smash")
 	TObjectPtr<USMSmashComponent> SmashComponent;
-// ~End of Tile Flip Section
+	// ~End of Tile Flip Section
 };

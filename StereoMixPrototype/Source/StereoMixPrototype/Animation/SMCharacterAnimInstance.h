@@ -35,7 +35,7 @@ protected: // Data Asset Section
 protected: // Cached Section
 	ISMCharacterAnimationInterface* StoredAnimationInterface;
 
-// ~Montage Section
+	// ~Montage Section
 public:
 	void PlayCatch();
 	void PlayCaught();
@@ -49,29 +49,34 @@ public:
 
 	void PlayStun();
 	void PlayStunEnd();
-// ~End of Montage Section
+	// ~End of Montage Section
 
-// ~Delegate Section
+	// ~Delegate Section
 public:
 	FOnMontageEnded OnSmashEnded;
 	FOnMontageEnded OnStandUpEnded;
 	FOnMontageEnded OnStunEnded;
-// ~End of Delegate Section
+	// ~End of Delegate Section
 
-// ~State Section
+	// ~State Section
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CharacterState")
-	uint32 bHasAcceleration:1;
+	uint32 bHasAcceleration : 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CharacterState")
-	uint32 bIsFalling:1;
+	uint32 bIsFalling : 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CharacterState")
 	float ZVelocity;
-// ~End of State Section
+	// ~End of State Section
 
-// ~Animation Data Section
+	// ~Animation Data Section
 public:
+	const USMCharacterAnimationAssetData* GetAssetData() const
+	{
+		return AssetData;
+	}
+
 	float GetStunEndLength();
-// ~End of Animation Data Section
+	// ~End of Animation Data Section
 };
